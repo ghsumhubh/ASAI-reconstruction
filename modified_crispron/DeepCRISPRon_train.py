@@ -48,12 +48,6 @@ SEED = 0
 TEST_N = 0
 TRAIN_PATH = 'co_data.csv'
 
-DO_SIZE_TESTS = True
-TEST_PRETRAIN = True
-DO_ALL = True
-sizes = [5000, 10000, 15000, 20000]
-
-
 
 print(
 'LEARN=%f' % LEARN,
@@ -259,181 +253,75 @@ d = read_seq_files(SEQ_C, VAL_C, VAL_G)
 (s, x, g, y) = preprocess_seq(d)
 
 
-#
-# Get models for each size
-#
-
-for size in sizes:
-    print("SEED", SEED)
-    # Number of folds
-    n_splits = 6
-    kf = KFold(n_splits=n_splits)
-
-    # Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
-    X = np.array(x)
-    G = np.array(g)
-    Y = np.array(y)
-
-    # sample the data after shuffling
-    indices = np.arange(X.shape[0])
-    np.random.shuffle(indices)
-    X = X[indices]
-    G = G[indices]
-    Y = Y[indices]
-
-    # sample the data to the size
-    X = X[:size]
-    G = G[:size]
-    Y = Y[:size]
-
-    split_num = 1
-    for train_index, val_index in kf.split(X):
-        # Splitting the data for this fold
-        x_train, x_val = X[train_index], X[val_index]
-        g_train, g_val = G[train_index], G[val_index]
-        y_train, y_val = Y[train_index], Y[val_index]
-
-        tinput = []
-        vinput = []
-
-        tinput.append(x_train)
-        vinput.append(x_val)
-
-        tinput.append(g_train)
-        vinput.append(g_val)
-
-        tinput = tuple(tinput)
-        vinput = tuple(vinput)
-
-        es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=100) # Patience was 150
-        mc = callbacks.ModelCheckpoint(str(split_num) + f'_{size}.model.best', verbose=1, save_best_only=True)
-        model = get_model()
-        # Fit the model for this fold
-        history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, \
-                            epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es, mc])
-        
-        print(history.history)
-        for key in history.history.keys():
-            # print key and value
-            print(key, history.history[key])
-
-        split_num += 1
-
-#
-# Test pretrain on each size
-#
-
-
-# split X G and Y to train test
-X_train, X_test, G_train, G_test, Y_train, Y_test = train_test_split(x, g, y, test_size=0.2, random_state=42)
-for size in sizes:
-
-    print("SEED", SEED)
-    # Number of folds
-    n_splits = 6
-    kf = KFold(n_splits=n_splits)
-
-    # Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
-    X = np.array(X_train)
-    G = np.array(G_train)
-    Y = np.array(Y_train)
-
-    # sample the data after shuffling
-    indices = np.arange(X.shape[0])
-    np.random.shuffle(indices)
-    X = X[indices]
-    G = G[indices]
-    Y = Y[indices]
-
-    # sample the data to the size
-    X = X[:size]
-    G = G[:size]
-    Y = Y[:size]
-
-    ensemble = []
-    for train_index, val_index in kf.split(X):
-        # Splitting the data for this fold
-        x_train, x_val = X[train_index], X[val_index]
-        g_train, g_val = G[train_index], G[val_index]
-        y_train, y_val = Y[train_index], Y[val_index]
-
-        tinput = []
-        vinput = []
-
-        tinput.append(x_train)
-        vinput.append(x_val)
-
-        tinput.append(g_train)
-        vinput.append(g_val)
-
-        tinput = tuple(tinput)
-        vinput = tuple(vinput)
-
-        es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=100) # Patience was 150
-        model = get_model()
-        # Fit the model for this fold
-        history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, \
-                            epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es])
-        ensemble.append(model)
-
-    # predict on test
-    X_TEST = np.array(X_test)
-    G_TEST = np.array(G_test)
-    Y_TEST = np.array(Y_test)
-
-    predictions = []
-    for model in ensemble:
-        predictions.append(model.predict([X_TEST, G_TEST]))
-    
-    predictions = np.array(predictions)
-    predictions = np.mean(predictions, axis=0)
-    # get spearman with test
-    spearman = stats.spearmanr(predictions, Y_TEST)
-    print(f"Size Test: {size}, Spearman: {spearman}")
-        
-
 # Get normal models
-split_num = 1
-for _ in range (5): #TODO: remove when doint last one
-    print("SEED", SEED)
-    # Number of folds
-    n_splits = 6
-    kf = KFold(n_splits=n_splits)
+print("SEED", SEED)
+# Number of folds
+n_splits = 6
+kf = KFold(n_splits=n_splits)
 
-    # Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
-    X = np.array(x)
-    G = np.array(g)
-    Y = np.array(y)
+# Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
+X = np.array(x)
+G = np.array(g)
+Y = np.array(y)
 
+speramans = []
 
-    for train_index, val_index in kf.split(X):
+# Create lists to store training, validation, and test indices
+train_val_indices = []
+test_indices = []
+
+# Split the data into 6 folds and store indices
+for train_index, val_index in kf.split(X):
+    train_val_indices.append(train_index)
+    test_indices.append(val_index)
+
+# Iterate over the folds
+for i in range(n_splits):
+    # Use one fold as the test set
+    test_index = test_indices[i]
+
+    # Use the remaining folds for training/validation
+    remaining_indices = np.concatenate([train_val_indices[j] for j in range(n_splits) if j != i])
+    remaining_kf = KFold(n_splits=n_splits-1)
+    
+    for train_index, val_index in remaining_kf.split(remaining_indices):
+        train_indices = remaining_indices[train_index]
+        val_indices = remaining_indices[val_index]
+
         # Splitting the data for this fold
-        x_train, x_val = X[train_index], X[val_index]
-        g_train, g_val = G[train_index], G[val_index]
-        y_train, y_val = Y[train_index], Y[val_index]
+        x_train, x_val, x_test = X[train_indices], X[val_indices], X[test_index]
+        g_train, g_val, g_test = G[train_indices], G[val_indices], G[test_index]
+        y_train, y_val, y_test = Y[train_indices], Y[val_indices], Y[test_index]
 
-        tinput = []
-        vinput = []
-
-        tinput.append(x_train)
-        vinput.append(x_val)
-
-        tinput.append(g_train)
-        vinput.append(g_val)
+        tinput = [x_train, g_train]
+        vinput = [x_val, g_val]
+        tinput_test = [x_test, g_test]
 
         tinput = tuple(tinput)
         vinput = tuple(vinput)
-
+        tinput_test = tuple(tinput_test)
         es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=100) # Patience was 150
-        mc = callbacks.ModelCheckpoint(str(split_num) + '.model.best', verbose=1, save_best_only=True)
         model = get_model()
+        
         # Fit the model for this fold
-        history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, \
-                            epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es, mc])
+        history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, 
+                            epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es])
         
         print(history.history)
         for key in history.history.keys():
             # print key and value
             print(key, history.history[key])
 
-        split_num += 1
+        # Make predictions on the test set
+        y_pred = model.predict(tinput_test)
+
+        # Calculate the Spearman correlation between the true and predicted values
+        from scipy.stats import spearmanr
+        spearman_corr, _ = spearmanr(y_test, y_pred)
+        speramans.append(spearman_corr[0])
+
+        print(f"Spearman correlation on the test set for fold {i}: {spearman_corr}")
+
+# Calculate the mean Spearman correlation
+mean_spearman = np.mean(speramans)
+print(f"Mean Spearman correlation: {mean_spearman}")
