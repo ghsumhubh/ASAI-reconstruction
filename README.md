@@ -2,7 +2,9 @@
 # ASAI reconstruction
 
 A reconstruction of the main results of the paper [Enhancing CRISPR-Cas9 gRNA efficiency
-prediction by data integration and deep learning](https://www.nature.com/articles/s41467-021-23576-0)
+prediction by data integration and deep learning](https://www.nature.com/articles/s41467-021-23576-0). 
+
+This reconstruction was done as a project in the course 'Advanced Topics in Artificial Intelligence(89950)' as part of our MSc degree in Bar-Ilan University.
 
 ## Requirements
 
