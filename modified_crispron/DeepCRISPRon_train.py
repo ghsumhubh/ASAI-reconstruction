@@ -34,8 +34,10 @@ from tensorflow.keras.layers import Conv1D, Dropout, AveragePooling1D, Flatten, 
 from scipy import stats
 from random import randint
 import sys
-
+from scipy.stats import spearmanr
+#import Levenshtein as lev
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import pairwise_distances
 
 
 LEARN = 0.0001 
@@ -47,6 +49,7 @@ BATCH_SIZE=500
 SEED = 0 
 TEST_N = 0
 TRAIN_PATH = 'co_data.csv'
+REPEATS = 5 # Try 10 later on
 
 
 print(
@@ -269,59 +272,78 @@ speramans = []
 # Create lists to store training, validation, and test indices
 train_val_indices = []
 test_indices = []
+# Split the data into 1/6 test and 5/6 train/val
 
-# Split the data into 6 folds and store indices
-for train_index, val_index in kf.split(X):
-    train_val_indices.append(train_index)
-    test_indices.append(val_index)
+ensemble_spearmans = []
+for i in range(REPEATS):
+    print(f"Repeat {i+1}/{REPEATS}")
 
-# Iterate over the folds
-for i in range(n_splits):
-    # Use one fold as the test set
-    test_index = test_indices[i]
+    test_size = 1/6
+    X_train_val, X_test, G_train_val, G_test, Y_train_val, Y_test = train_test_split(X, G, Y, test_size=test_size, random_state=42)
 
-    # Use the remaining folds for training/validation
-    remaining_indices = np.concatenate([train_val_indices[j] for j in range(n_splits) if j != i])
-    remaining_kf = KFold(n_splits=n_splits-1)
-    
-    for train_index, val_index in remaining_kf.split(remaining_indices):
-        train_indices = remaining_indices[train_index]
-        val_indices = remaining_indices[val_index]
+    # flatten except for the last dimension
+    X_train_val_flat = X_train_val.reshape(X_train_val.shape[0], -1)
+    X_test_flat = X_test.reshape(X_test.shape[0], -1)
 
-        # Splitting the data for this fold
-        x_train, x_val, x_test = X[train_indices], X[val_indices], X[test_index]
-        g_train, g_val, g_test = G[train_indices], G[val_indices], G[test_index]
-        y_train, y_val, y_test = Y[train_indices], Y[val_indices], Y[test_index]
+    hamming_distances = pairwise_distances(X_test_flat, X_train_val_flat, metric='hamming') * X_train_val_flat.shape[1]
+    test_samples_to_remove = np.any(hamming_distances <= 6, axis=1)
+    X_test= X_test[~test_samples_to_remove]
+    G_test = G_test[~test_samples_to_remove]
+    Y_test = Y_test[~test_samples_to_remove]
 
-        tinput = [x_train, g_train]
-        vinput = [x_val, g_val]
-        tinput_test = [x_test, g_test]
 
-        tinput = tuple(tinput)
-        vinput = tuple(vinput)
-        tinput_test = tuple(tinput_test)
-        es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=100) # Patience was 150
-        model = get_model()
+
+    n_splits = 5
+    kf = KFold(n_splits=n_splits)
+
+    #spearman_corrs = []
+
+    # Store predictions for the ensemble
+    predictions = np.zeros((X_test.shape[0], n_splits))
+
+    # Perform 5-fold cross-validation on the training/validation set
+    for fold, (train_index, val_index) in enumerate(kf.split(X_train_val)):
+        x_train, x_val = X_train_val[train_index], X_train_val[val_index]
+        g_train, g_val = G_train_val[train_index], G_train_val[val_index]
+        y_train, y_val = Y_train_val[train_index], Y_train_val[val_index]
+
+        tinput = (x_train, g_train)
+        vinput = (x_val, g_val)
+        tinput_test = (X_test, G_test)
+
+        best_model = None
+        best_val_loss = float('inf')
+
+        for i in range(10):
+
+            es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=100)
+            model = get_model()
         
-        # Fit the model for this fold
-        history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, 
-                            epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es])
+            # Fit the model for this fold
+            history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, 
+                                epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es])
+            
+            # Get the best model based on validation loss
+            if history.history['val_loss'][-1] < best_val_loss:
+                best_val_loss = history.history['val_loss'][-1]
+                best_model = model
         
-        print(history.history)
-        for key in history.history.keys():
-            # print key and value
-            print(key, history.history[key])
-
         # Make predictions on the test set
-        y_pred = model.predict(tinput_test)
+        y_pred = best_model.predict(tinput_test)
 
-        # Calculate the Spearman correlation between the true and predicted values
-        from scipy.stats import spearmanr
-        spearman_corr, _ = spearmanr(y_test, y_pred)
-        speramans.append(spearman_corr[0])
+        # Store predictions for ensemble
+        predictions[:, fold] = y_pred.flatten()
 
-        print(f"Spearman correlation on the test set for fold {i}: {spearman_corr}")
+    # Ensemble predictions by averaging
+    ensemble_pred = np.mean(predictions, axis=1)
+
+    # Calculate the Spearman correlation for the ensemble predictions
+    ensemble_spearman_corr, _ = spearmanr(Y_test, ensemble_pred)
+    print(f"Spearman correlation of ensemble on the test set: {ensemble_spearman_corr}")
+
+    ensemble_spearmans.append(ensemble_spearman_corr)
 
 # Calculate the mean Spearman correlation
-mean_spearman = np.mean(speramans)
-print(f"Mean Spearman correlation: {mean_spearman}")
+mean_ensemble_spearman = np.mean(ensemble_spearmans)
+print(f"Mean Spearman correlation of ensemble: {mean_ensemble_spearman}")
+print(f"Standard deviation of Spearman correlation of ensemble: {np.std(ensemble_spearmans)}")

@@ -15,10 +15,12 @@ https://github.com/RTH-tools/crispron
 We personally used python 3.6 for our reconstruction whenver running CRISPRon scripts (With their reccomended versions), while for the preprocessing steps done in interactive python notebooks we used the following configuration on a windows 11 machine:
 
 - Python 3.11.4
-- numpy                   1.26.4
-- pandas                  2.2.2
-- matplotlib              3.8.4
-- scipy                   1.13.0
+- numpy 1.26.4
+- pandas 2.2.2
+- matplotlib 3.8.4
+- scipy 1.13.0
+- scikit-learn 0.20.0
+
 ## Running the Reconstruction
 
 ### Cloning CRISPRon's repo
